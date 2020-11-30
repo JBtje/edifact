@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace EDI;
 
+use function implode;
+use function is_array;
+use function trim;
+use function wordwrap;
+
 /**
  * EDIFACT Messages Parser
  * (c)2016 Uldis Nelsons
@@ -29,6 +34,10 @@ class Analyser
      */
     private $codes;
 
+    /**
+     * @var string directory for caching EDI documentation files
+     */
+    public $docCacheDir = '';
     /**
      * @param string $message_xml_file
      *
@@ -64,7 +73,7 @@ class Analyser
         }
 
         $codesXml = new \SimpleXMLIterator($codesXmlString);
-        $this->codes = [];
+        $codes = [];
         foreach ($codesXml as $codeCollection) {
             \assert($codeCollection instanceof \SimpleXMLIterator);
 
@@ -81,12 +90,12 @@ class Analyser
                 $codeAttributes = $codeNode->attributes();
                 if ($codeAttributes !== null) {
                     $code = (string) $codeAttributes->id;
-                    $this->codes[$id][$code] = (string) $codeAttributes->desc;
+                    $codes[$id][$code] = (string) $codeAttributes->desc;
                 }
             }
         }
 
-        return $this->codes;
+        return $codes;
     }
 
     /**
@@ -147,13 +156,14 @@ class Analyser
     public function process(array $data, array $rawSegments = null): string
     {
         $r = [];
+        $unseceOrg = new UnseceOrg($this->directory,$this->docCacheDir);
         foreach ($data as $nrow => $segment) {
             $id = $segment[0];
 
             $r[] = '';
             $jsonsegment = [];
-            if (isset($rawSegments[$nrow])) {
-                $r[] = \trim($rawSegments[$nrow]);
+            if (isset($rawSegments[$nrow+1])) {
+                $r[] = trim($rawSegments[$nrow+1]);
             }
 
             if (isset($this->segments[$id])) {
@@ -162,10 +172,10 @@ class Analyser
 
                 $idHeader = $id . ' - ' . $attributes['name'];
                 if($this->directory && $id !== 'UNB') {
-                    $idHeader .= ' http://www.unece.org/trade/untdid/' . strtolower($this->directory) . '/trsd/trsd' . strtolower($id) . '.htm';
+                    $idHeader .= ' ' . $unseceOrg->getMessageLink($id);
                 }
                 $r[] = $idHeader;
-                $r[] = '  (' . \wordwrap($attributes['desc'], 75, \PHP_EOL . '  ') . ')';
+                $r[] = '  (' . wordwrap($attributes['desc'], 75, \PHP_EOL . '  ') . ')';
 
                 $jsonelements = ['segmentCode' => $id];
                 foreach ($segment as $idx => $detail) {
@@ -175,28 +185,43 @@ class Analyser
                     }
                     $d_desc_attr = $details_desc[$n]['attributes'];
                     $l1 = '      ' . $d_desc_attr['id'] . ' - ' . $d_desc_attr['name'];
-                    $l2 = '      ' . \wordwrap($d_desc_attr['desc'], 71, \PHP_EOL . '      ');
+                    $l2 = '      ' . wordwrap($d_desc_attr['desc'], 71, \PHP_EOL . '      ');
 
-                    if (\is_array($detail)) {
-                        $r[] = '  [' . $n . '] ' . \implode(',', $detail);
+                    $sub_details_desc = $details_desc[$n]['details'] ?? false;
+
+                    /**
+                     * if in details not array (is one element), but in detail description is sub detail is changed as first detail element
+                     */
+                    if ($sub_details_desc && !is_array($detail)) {
+                        $detail = [$detail];
+                    }
+
+                    if (is_array($detail)) {
+                        $r[] = '  [' . $n . '] ' . implode(',', $detail);
                         $r[] = $l1;
                         $r[] = $l2;
 
                         $jsoncomposite = [];
-                        if (isset($details_desc[$n]['details'])) {
-                            $sub_details_desc = $details_desc[$n]['details'];
-
+                        if ($sub_details_desc) {
                             foreach ($detail as $d_n => $d_detail) {
                                 $d_sub_desc_attr = $sub_details_desc[$d_n]['attributes'];
                                 $codeElementId = $d_sub_desc_attr['id'];
                                 $line = '    [' . $d_n . '] ' . $d_detail;
                                 if(isset($this->codes[(int)$codeElementId][$d_detail])){
                                     $line .= ' - ' . $this->codes[$codeElementId][$d_detail];
+                                }else{
+                                    if($segmentData = $unseceOrg->getElementValueData($codeElementId, $d_detail)){
+                                        $line .= ' - ' . $segmentData->description . '|';
+                                        if($segmentData->comments){
+                                            $line .= PHP_EOL . '           ' . $segmentData->description;
+                                        }
+                                    }
+                                    //$idHeader .= ' http://www.unece.org/trade/untdid/' . strtolower($this->directory) . '/trsd/trsd' . strtolower($id) . '.htm';
                                 }
                                 $r[] = $line;
 
                                 $r[] = '        id: ' . $codeElementId . ' - ' . $d_sub_desc_attr['name'];
-                                $r[] = '        ' . \wordwrap($d_sub_desc_attr['desc'], 69, \PHP_EOL . '        ');
+                                $r[] = '        ' . wordwrap($d_sub_desc_attr['desc'], 69, \PHP_EOL . '        ');
                                 $r[] = '        type: ' . $d_sub_desc_attr['type'];
 
                                 $jsoncomposite[$d_sub_desc_attr['name']] = $d_detail;
@@ -230,7 +255,15 @@ class Analyser
                         }
                         $jsonelements[$d_desc_attr['name']] = $jsoncomposite;
                     } else {
-                        $r[] = '  [' . $n . '] ' . $detail;
+                        $l0 = '  [' . $n . '] ' . $detail;
+                        if($segmentData = $unseceOrg->getElementValueData($d_desc_attr['id'], $detail)){
+                            $l0 .= ' - ' . $segmentData->description;
+                            if($segmentData->comments){
+                                $l0 .= PHP_EOL . '           ' . $segmentData->comments;
+                            }
+                        }
+
+                        $r[] = $l0;
                         $r[] = $l1;
                         $r[] = $l2;
                         $jsonelements[$d_desc_attr['name']] = $detail;
@@ -244,7 +277,7 @@ class Analyser
             $this->jsonedi[] = $jsonsegment;
         }
 
-        return \implode(\PHP_EOL, $r);
+        return implode(\PHP_EOL, $r);
     }
 
     /**

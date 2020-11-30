@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace EDI;
 
+use function count;
+use function explode;
+use function is_array;
+use function is_string;
+
 /**
  *  EDIFACT Messages Reader
  * (c)2016 Uldis Nelsons
@@ -14,6 +19,8 @@ class Reader
      * @var array parsed EDI file
      */
     private $parsedfile;
+
+    public $rawSegments;
 
     /**
      * @var array<int,string>
@@ -69,8 +76,9 @@ class Reader
      */
     public function load(string $url): bool
     {
-        $this->parsedfile = (new Parser($url))->get();
-
+        $parser = new Parser($url);
+        $this->parsedfile = $parser->get();
+        $this->rawSegments = $parser->getRawSegments();
         return $this->preValidate();
     }
 
@@ -95,7 +103,7 @@ class Reader
     {
         $this->errors = [];
 
-        if (!\is_array($this->parsedfile)) {
+        if (!is_array($this->parsedfile)) {
             $this->errors[] = 'Incorrect format parsed file';
 
             return false;
@@ -108,7 +116,7 @@ class Reader
             (
                 $this->errors !== []
                 &&
-                $this->errors[0] == 'Segment "UNH" is ambiguous'
+                $this->errors[0] === 'Segment "UNH" is ambiguous'
             )
         ) {
             $this->errors = [];
@@ -205,76 +213,21 @@ class Reader
      *
      * @return string|null
      */
-    public function readEdiDataValue($filter, int $l1, $l2 = false, bool $required = false)
+    public function readEdiDataValue($filter, int $l1, $l2 = false, bool $required = false, bool $firstSegment = false)
     {
         // interpret filter parameters
-        if (\is_array($filter)) {
+        if (is_array($filter)) {
             $segment_name = $filter[0];
             $filter_elements = $filter[1];
         } else {
             $segment_name = $filter;
-            $filter_elements = false;
+            $filter_elements = [];
         }
-
-        // init
-        $segment = false;
-        $segment_count = 0;
-
-        // search segment, who conform to filter
-        foreach ($this->parsedfile as $edi_row) {
-            if ($edi_row[0] == $segment_name) {
-                if ($filter_elements) {
-                    $filter_ok = false;
-                    foreach ($filter_elements as $el_id => $el_value) {
-                        $f_el_list = \explode('.', (string) $el_id);
-                        if (\count($f_el_list) === 1) {
-                            if (
-                                isset($edi_row[$el_id])
-                                &&
-                                $edi_row[$el_id] == $el_value
-                            ) {
-                                $filter_ok = true;
-
-                                break;
-                            }
-                        } elseif (
-                            isset($edi_row[$f_el_list[0]])
-                            &&
-                            (
-                                (
-                                    isset($edi_row[$f_el_list[0]][$f_el_list[1]])
-                                    &&
-                                    \is_array($edi_row[$f_el_list[0]])
-                                    &&
-                                    $edi_row[$f_el_list[0]][$f_el_list[1]] == $el_value
-                                )
-                                ||
-                                (
-                                    isset($edi_row[$f_el_list[0]])
-                                    &&
-                                    \is_string($edi_row[$f_el_list[0]])
-                                    &&
-                                    $edi_row[$f_el_list[0]] == $el_value
-                                )
-                            )
-                        ) {
-                            $filter_ok = true;
-
-                            break;
-                        }
-                    }
-
-                    if ($filter_ok === false) {
-                        continue;
-                    }
-                }
-                $segment = $edi_row;
-                ++$segment_count;
-            }
-        }
+        //$segment = $this->findSegment($segment_name, $filter_elements);
+        $idList = $this->findSegmentId($segment_name, $filter_elements);
 
         // no found segment
-        if (!$segment) {
+        if (!$idList) {
             if ($required) {
                 $this->errors[] = 'Segment "' . $segment_name . '" no exist';
             }
@@ -283,37 +236,14 @@ class Reader
         }
 
         // found more one segment - error
-        if ($segment_count > 1) {
+        if (!$firstSegment && count($idList) > 1) {
             $this->errors[] = 'Segment "' . $segment_name . '" is ambiguous';
 
             return null;
         }
+        $segment = $this->parsedfile[$idList[0]];
 
-        // validate elements
-        if (!isset($segment[$l1])) {
-            if ($required) {
-                $this->errors[] = 'Segment value "' . $segment_name . '[' . $l1 . ']" no exist';
-            }
-
-            return null;
-        }
-
-        // requested first level element
-        if ($l2 === false) {
-            return $segment[$l1];
-        }
-
-        // requested second level element, but not exist
-        if (!\is_array($segment[$l1]) || !isset($segment[$l1][$l2])) {
-            if ($required) {
-                $this->errors[] = 'Segment value "' . $segment_name . '[' . $l1 . '][' . $l2 . ']" no exist';
-            }
-
-            return null;
-        }
-
-        // second level element
-        return $segment[$l1][$l2];
+        return $this->getElement($segment, $l1, $l2, $required, $segment_name);
     }
 
     /**
@@ -343,10 +273,15 @@ class Reader
         }
     }
 
+    public function findEdiSegmentDTMId($PeriodQualifier)
+    {
+        return $this->findSegmentIdOne('DTM', ['1.0' => $PeriodQualifier]);
+    }
+
     /**
+     * @return string|null
      * @deprecated
      *
-     * @return string|null
      */
     public function readUNBDateTimeOfPpreperation()
     {
@@ -354,9 +289,9 @@ class Reader
     }
 
     /**
+     * @return string|null
      * @deprecated
      *
-     * @return string|null
      */
     public function readUNBDateTimeOfPreperation()
     {
@@ -375,7 +310,7 @@ class Reader
         if (!empty($date)) {
             $time = $this->readEdiDataValue('UNB', 4, 1);
             if ($time !== null) {
-                $time = (string) \preg_replace('#(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)#', '20$1-$2-$3 $4:$5:00', $date . $time);
+                $time = (string)\preg_replace('#(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)#', '20$1-$2-$3 $4:$5:00', $date . $time);
             }
 
             return $time;
@@ -384,7 +319,7 @@ class Reader
         // common YYYYMMDDHHMM
         $datetime = $this->readEdiDataValue('UNB', 4);
         if ($datetime !== null) {
-            $datetime = (string) \preg_replace('#(\d\d\d\d)(\d\d)(\d\d)(\d\d)(\d\d)#', '$1-$2-$3 $4:$5:00', $datetime);
+            $datetime = (string)\preg_replace('#(\d\d\d\d)(\d\d)(\d\d)(\d\d)(\d\d)#', '$1-$2-$3 $4:$5:00', $datetime);
         }
 
         return $datetime;
@@ -466,22 +401,22 @@ class Reader
 
         foreach ($this->parsedfile as $edi_row) {
             // search before group segment
-            if ($position == 'before_search' && $edi_row[0] == $before) {
+            if ($position === 'before_search' && $edi_row[0] == $before) {
                 $position = 'before_is';
 
                 continue;
             }
 
-            if ($position == 'before_search') {
+            if ($position === 'before_search') {
                 continue;
             }
 
-            if ($position == 'before_is' && $edi_row[0] == $before) {
+            if ($position === 'before_is' && $edi_row[0] == $before) {
                 continue;
             }
 
             // after before search start
-            if ($position == 'before_is' && $edi_row[0] == $start) {
+            if ($position === 'before_is' && $edi_row[0] == $start) {
                 $position = 'group_is';
                 $group[] = $edi_row;
 
@@ -489,21 +424,21 @@ class Reader
             }
 
             // if after before segment no start segment, search again before segment
-            if ($position == 'before_is') {
+            if ($position === 'before_is') {
                 $position = 'before_search';
 
                 continue;
             }
 
             // get group element
-            if ($position == 'group_is' && $edi_row[0] != $end) {
+            if ($position === 'group_is' && $edi_row[0] != $end) {
                 $group[] = $edi_row;
 
                 continue;
             }
 
             // found end of group
-            if ($position == 'group_is' && $edi_row[0] == $end) {
+            if ($position === 'group_is' && $edi_row[0] == $end) {
                 $position = 'group_finish';
                 $group[] = $edi_row;
                 $groups[] = $group;
@@ -513,7 +448,7 @@ class Reader
             }
 
             // next group start
-            if ($position == 'group_finish' && $edi_row[0] == $start) {
+            if ($position === 'group_finish' && $edi_row[0] == $start) {
                 $group[] = $edi_row;
                 $position = 'group_is';
 
@@ -521,7 +456,7 @@ class Reader
             }
 
             // finish
-            if ($position == 'group_finish' && $edi_row[0] == $after) {
+            if ($position === 'group_finish' && $edi_row[0] == $after) {
                 break;
             }
 
@@ -538,7 +473,7 @@ class Reader
      * Get groups from message when last segment is unknown but you know the barrier
      * useful for invoices by default.
      *
-     * @param string                  $start   first segment start a new group
+     * @param string $start first segment start a new group
      * @param array<array-key,string> $barrier barrier segment (NOT in group)
      *
      * @return array<mixed>
@@ -553,7 +488,7 @@ class Reader
         foreach ($this->getParsedFile() as $edi_row) {
             $segment = $edi_row[0];
             if (
-                $position == 'group_is'
+                $position === 'group_is'
                 &&
                 (
                     $segment == $start
@@ -573,7 +508,7 @@ class Reader
             }
 
             // add element to group
-            if ($position == 'group_is') {
+            if ($position === 'group_is') {
                 $group[] = $edi_row;
             }
         }
@@ -603,4 +538,122 @@ class Reader
             }
         }
     }
+
+    /**
+     * search segment by segment code and elements
+     * @param string $segment_name
+     * @param array   $filter_elements
+     *
+     * @return int|null
+     */
+    public function findSegmentIdOne(string $segment_name, array $filter_elements = [])
+    {
+        $list = $this->findSegmentId($segment_name, $filter_elements);
+        return $list[0]??null;
+    }
+
+    /**
+     * search segment by segment code and elements
+     * @param string $segment_name
+     * @param array   $filter_elements
+     *
+     * @return array
+     */
+    public function findSegmentId(string $segment_name,array $filter_elements = []): array
+    {
+        // init
+        $idList = [];
+
+        // search segment, who conform to filter
+        foreach ($this->parsedfile as $segmentId => $edi_row) {
+            if ($edi_row[0] === $segment_name) {
+                if ($filter_elements) {
+                    $filter_ok = false;
+                    foreach ($filter_elements as $el_id => $el_value) {
+                        $f_el_list = explode('.', (string)$el_id);
+                        if (count($f_el_list) === 1) {
+                            if (
+                                isset($edi_row[$el_id])
+                                &&
+                                $edi_row[$el_id] == $el_value
+                            ) {
+                                $filter_ok = true;
+
+                                break;
+                            }
+                        } elseif (
+                            isset($edi_row[$f_el_list[0]])
+                            &&
+                            (
+                                (
+                                    isset($edi_row[$f_el_list[0]][$f_el_list[1]])
+                                    &&
+                                    is_array($edi_row[$f_el_list[0]])
+                                    &&
+                                    $edi_row[$f_el_list[0]][$f_el_list[1]] == $el_value
+                                )
+                                ||
+                                (
+                                    isset($edi_row[$f_el_list[0]])
+                                    &&
+                                    is_string($edi_row[$f_el_list[0]])
+                                    &&
+                                    $edi_row[$f_el_list[0]] == $el_value
+                                )
+                            )
+                        ) {
+                            $filter_ok = true;
+
+                            break;
+                        }
+                    }
+
+                    if ($filter_ok === false) {
+                        continue;
+                    }
+                }
+                $idList[] = $segmentId;
+            }
+        }
+
+        return $idList;
+    }
+
+    /**
+     * @param        $segment
+     * @param int    $l1
+     * @param bool   $required
+     * @param string $segment_name
+     * @param int|false    $l2
+     *
+     * @return mixed|null
+     */
+    public function getElement($segment, int $l1, $l2, bool $required, string $segment_name = '')
+    {
+        // validate elements
+        if (!isset($segment[$l1])) {
+            if ($required) {
+                $this->errors[] = 'Segment value "' . $segment_name . '[' . $l1 . ']" no exist';
+            }
+
+            return null;
+        }
+
+        // requested first level element
+        if ($l2 === false) {
+            return $segment[$l1];
+        }
+
+        // requested second level element, but not exist
+        if (!is_array($segment[$l1]) || !isset($segment[$l1][$l2])) {
+            if ($required) {
+                $this->errors[] = 'Segment value "' . $segment_name . '[' . $l1 . '][' . $l2 . ']" no exist';
+            }
+
+            return null;
+        }
+
+        // second level element
+        return $segment[$l1][$l2];
+}
 }

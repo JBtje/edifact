@@ -29,10 +29,11 @@
         "php": ">=7.0.0",
         "ext-json": "*",
         "ext-simplexml": "*",
-        "voku/arrayy": "~7.1"
+        "voku/arrayy": "~7.1",
+      "yii2mod/yii2-ftp": "dev-master",
+      "php-edifact/edifact-mapping": "dev-master"
     },
     "require-dev": {
-        "php-edifact/edifact-mapping": "dev-master",
         "phpunit/phpunit": "~6.0"
     },
     "autoload": {
