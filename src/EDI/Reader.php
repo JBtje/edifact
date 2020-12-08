@@ -218,7 +218,7 @@ class Reader
         // interpret filter parameters
         if (is_array($filter)) {
             $segment_name = $filter[0];
-            $filter_elements = $filter[1];
+            $filter_elements = $filter[1]??[];
         } else {
             $segment_name = $filter;
             $filter_elements = [];
@@ -273,10 +273,41 @@ class Reader
         }
     }
 
+    /**
+     * read date from DTM segment period qualifier - codelist 2005
+     *
+     * @param int $qualifier 1 - Storage temptreture, 2 - transport temreture
+     *
+     * @return string|null Fahrenheit
+     */
+    public function readEdiSegmentTmpFah($qualifier)
+    {
+        $value = $this->readEdiDataValue(['TMP', ['1' => $qualifier]], 2,0);
+        $format = $this->readEdiDataValue(['TMP', ['1' => $qualifier]], 2, 1);
+        if (empty($value)) {
+            return $value;
+        }
+        switch ($format) {
+
+            case 'FAH':
+                return $value;
+
+            case 'CEL':
+                return $value*9/5+32;
+
+            default:
+                return $null;
+        }
+    }
+    public function readEdiSegmentTmpId($qualifier){
+        return $this->findSegmentIdOne('TMP', ['1' => $qualifier]);
+    }
+
     public function findEdiSegmentDTMId($PeriodQualifier)
     {
         return $this->findSegmentIdOne('DTM', ['1.0' => $PeriodQualifier]);
     }
+
 
     /**
      * @return string|null
