@@ -283,10 +283,10 @@ class Reader
     public function readEdiSegmentTmpFah($qualifier)
     {
         $value = $this->readEdiDataValue(['TMP', ['1' => $qualifier]], 2,0);
-        $format = $this->readEdiDataValue(['TMP', ['1' => $qualifier]], 2, 1);
-        if (empty($value)) {
-            return $value;
+        if($value === null){
+            return null;
         }
+        $format = $this->readEdiDataValue(['TMP', ['1' => $qualifier]], 2, 1);
         switch ($format) {
 
             case 'FAH':
@@ -310,10 +310,11 @@ class Reader
     public function readEdiSegmentTmpC($qualifier)
     {
         $value = $this->readEdiDataValue(['TMP', ['1' => $qualifier]], 2,0);
-        $format = $this->readEdiDataValue(['TMP', ['1' => $qualifier]], 2, 1);
-        if (empty($value)) {
-            return $value;
+        if($value === null){
+            return null;
         }
+        $format = $this->readEdiDataValue(['TMP', ['1' => $qualifier]], 2, 1);
+
         switch ($format) {
 
             case 'FAH':
