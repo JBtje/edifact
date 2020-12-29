@@ -274,7 +274,7 @@ class Reader
     }
 
     /**
-     * read date from DTM segment period qualifier - codelist 2005
+     * read temperature from TMP segment in - Fahrenheit
      *
      * @param int $qualifier 1 - Storage temptreture, 2 - transport temreture
      *
@@ -294,6 +294,33 @@ class Reader
 
             case 'CEL':
                 return $value*9/5+32;
+
+            default:
+                return $null;
+        }
+    }
+
+    /**
+     * read temperature from TMP segment in Celsius
+     *
+     * @param int $qualifier 1 - Storage temptreture, 2 - transport temreture
+     *
+     * @return string|null Fahrenheit
+     */
+    public function readEdiSegmentTmpC($qualifier)
+    {
+        $value = $this->readEdiDataValue(['TMP', ['1' => $qualifier]], 2,0);
+        $format = $this->readEdiDataValue(['TMP', ['1' => $qualifier]], 2, 1);
+        if (empty($value)) {
+            return $value;
+        }
+        switch ($format) {
+
+            case 'FAH':
+                return ($value-32)/1.8;
+
+            case 'CEL':
+                return $value;
 
             default:
                 return $null;
