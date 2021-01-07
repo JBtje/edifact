@@ -293,7 +293,7 @@ class Reader
                 return $value;
 
             case 'CEL':
-                return $value*9/5+32;
+                return round($value*9/5+32);
 
             default:
                 return $null;
@@ -318,7 +318,7 @@ class Reader
         switch ($format) {
 
             case 'FAH':
-                return ($value-32)/1.8;
+                return round(($value-32)/1.8);
 
             case 'CEL':
                 return $value;
