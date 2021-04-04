@@ -441,6 +441,27 @@ class Reader
         return $this->readEdiDataValue('UNH', 3);
     }
 
+    public function splitByUnh()
+    {
+        $unhIdList = $this->findSegmentId('UNH');
+        if(count($unhIdList) === 1){
+            return [implode( "\n",$this->rawSegments)];
+        }
+        $messagesList = [];
+        foreach($unhIdList as $listKey => $unhId){
+            $nextListKey = $listKey + 1;
+            if(isset($unhIdList[$nextListKey])) {
+                $message = array_slice($this->rawSegments, $unhId,$unhIdList[$nextListKey]);
+            }else{
+                $message = array_slice($this->rawSegments, $unhId);
+            }
+            array_unshift($message,$this->rawSegments[0]);
+            $messagesList[] = implode( "\n",$message);
+        }
+
+        return $messagesList;
+    }
+
     /**
      * Get groups from message.
      *
@@ -460,7 +481,8 @@ class Reader
 
         foreach ($this->parsedfile as $edi_row) {
             // search before group segment
-            if ($position === 'before_search' && $edi_row[0] == $before) {
+            $ediTag = $edi_row[0];
+            if ($position === 'before_search' && $ediTag == $before) {
                 $position = 'before_is';
 
                 continue;
@@ -470,12 +492,12 @@ class Reader
                 continue;
             }
 
-            if ($position === 'before_is' && $edi_row[0] == $before) {
+            if ($position === 'before_is' && $ediTag == $before) {
                 continue;
             }
 
             // after before search start
-            if ($position === 'before_is' && $edi_row[0] == $start) {
+            if ($position === 'before_is' && $ediTag == $start) {
                 $position = 'group_is';
                 $group[] = $edi_row;
 
@@ -490,14 +512,14 @@ class Reader
             }
 
             // get group element
-            if ($position === 'group_is' && $edi_row[0] != $end) {
+            if ($position === 'group_is' && $ediTag != $end && $ediTag != $after) {
                 $group[] = $edi_row;
 
                 continue;
             }
 
             // found end of group
-            if ($position === 'group_is' && $edi_row[0] == $end) {
+            if ($position === 'group_is' && $ediTag == $end) {
                 $position = 'group_finish';
                 $group[] = $edi_row;
                 $groups[] = $group;
@@ -507,7 +529,7 @@ class Reader
             }
 
             // next group start
-            if ($position === 'group_finish' && $edi_row[0] == $start) {
+            if ($position === 'group_finish' && $ediTag == $start) {
                 $group[] = $edi_row;
                 $position = 'group_is';
 
@@ -515,7 +537,12 @@ class Reader
             }
 
             // finish
-            if ($position === 'group_finish' && $edi_row[0] == $after) {
+            if ($position === 'group_finish' && $ediTag == $after) {
+                $groups[] = $group;
+                break;
+            }
+            if ($position === 'group_is' && $ediTag == $after) {
+                $groups[] = $group;
                 break;
             }
 
