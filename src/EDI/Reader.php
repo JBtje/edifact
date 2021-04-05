@@ -441,27 +441,6 @@ class Reader
         return $this->readEdiDataValue('UNH', 3);
     }
 
-    public function splitByUnh()
-    {
-        $unhIdList = $this->findSegmentId('UNH');
-        if(count($unhIdList) === 1){
-            return [implode( "\n",$this->rawSegments)];
-        }
-        $messagesList = [];
-        foreach($unhIdList as $listKey => $unhId){
-            $nextListKey = $listKey + 1;
-            if(isset($unhIdList[$nextListKey])) {
-                $message = array_slice($this->rawSegments, $unhId,$unhIdList[$nextListKey]);
-            }else{
-                $message = array_slice($this->rawSegments, $unhId);
-            }
-            array_unshift($message,$this->rawSegments[0]);
-            $messagesList[] = implode( "\n",$message);
-        }
-
-        return $messagesList;
-    }
-
     /**
      * Get groups from message.
      *
