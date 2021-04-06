@@ -490,6 +490,12 @@ class Reader
                 continue;
             }
 
+            // $end is *
+            if ($position === 'group_is' && '*' === $end && $ediTag === $start) {
+                $groups[] = $group;
+                $group = [];
+            }
+
             // get group element
             if ($position === 'group_is' && $ediTag != $end && $ediTag != $after) {
                 $group[] = $edi_row;
@@ -510,6 +516,95 @@ class Reader
             // next group start
             if ($position === 'group_finish' && $ediTag == $start) {
                 $group[] = $edi_row;
+                $position = 'group_is';
+
+                continue;
+            }
+
+            // finish
+            if ($position === 'group_finish' && $ediTag == $after) {
+                $groups[] = $group;
+                break;
+            }
+            if ($position === 'group_is' && $ediTag == $after) {
+                $groups[] = $group;
+                break;
+            }
+
+            $this->errors[] = 'Reading group ' . $before . '/' . $start . '/' . $end . '/' . $after
+                              . '. Error on position: ' . $position;
+
+            return false;
+        }
+
+        return $groups;
+    }
+
+    public function readRawGroups(string $before, string $start, string $end, string $after)
+    {
+        // init
+        $groups = [];
+        $group = [];
+        $position = 'before_search';
+
+        foreach ($this->parsedfile as $rowKey => $edi_row) {
+            // search before group segment
+            $ediTag = $edi_row[0];
+            if ($position === 'before_search' && $ediTag == $before) {
+                $position = 'before_is';
+
+                continue;
+            }
+
+            if ($position === 'before_search') {
+                continue;
+            }
+
+            if ($position === 'before_is' && $ediTag == $before) {
+                continue;
+            }
+
+            // after before search start
+            if ($position === 'before_is' && $ediTag == $start) {
+                $position = 'group_is';
+                $group[] = $this->rawSegments[$rowKey];
+
+                continue;
+            }
+
+            // if after before segment no start segment, search again before segment
+            if ($position === 'before_is') {
+                $position = 'before_search';
+
+                continue;
+            }
+
+            // $end is *
+            if ($position === 'group_is' && '*' === $end && $ediTag === $start) {
+                $groups[] = $group;
+                $group = [];
+            }
+
+            // get group element
+            if ($position === 'group_is' && $ediTag != $end && $ediTag != $after) {
+                $group[] = $this->rawSegments[$rowKey];
+
+                continue;
+            }
+
+            // found end of group
+            if ($position === 'group_is' && $ediTag == $end) {
+                $position = 'group_finish';
+                $group[] = $this->rawSegments[$rowKey];
+                $groups[] = $group;
+                $group = [];
+
+                continue;
+            }
+
+            // next group start
+            if ($position === 'group_finish' && $ediTag == $start) {
+                $group[] = $this->rawSegments[$rowKey];
                 $position = 'group_is';
 
                 continue;
