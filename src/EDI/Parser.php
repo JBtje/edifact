@@ -304,7 +304,8 @@ class Parser
         }
 
         $this->messageFormat = $lineElement[0];
-        $this->messageDirectory = $lineElement[2];
+        $this->messageVersion = $lineElement[1];
+        $this->messageDirectory = $lineElement[2] ?? '';
     }
 
     /**
