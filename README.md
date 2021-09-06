@@ -7,7 +7,7 @@ Supported syntax is version 3.
 
 It's provided in a Composer package:
 
-`composer require sabas/edifact`
+`composer require jbtje/edifact`
 
 The mapping xml files are provided in a separate package:
 
